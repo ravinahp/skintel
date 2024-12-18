@@ -1,9 +1,13 @@
-require('dotenv').config();
-const express = require('express');
-const cors = require('cors');
-const morgan = require('morgan');
-const RedditService = require('./services/redditService');
-const SchedulerService = require('./services/schedulerService');
+import dotenv from 'dotenv';
+import express from 'express';
+import cors from 'cors';
+import morgan from 'morgan';
+import SchedulerService from './services/schedulerService.js';
+import RedditService from './services/redditService.js';
+
+dotenv.config();
+
+process.removeAllListeners('warning');
 
 const app = express();
 const redditService = new RedditService();
@@ -67,4 +71,15 @@ app.get('/api/scheduler/status', (req, res) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Server running in ${process.env.NODE_ENV} mode on port ${PORT}`);
+});
+
+// Add better error handling
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught Exception:', error);
+  // Optionally notify your error tracking service
+});
+
+process.on('unhandledRejection', (error) => {
+  console.error('Unhandled Rejection:', error);
+  // Optionally notify your error tracking service
 });

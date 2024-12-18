@@ -1,5 +1,4 @@
-// Import the fetch library for making HTTP requests
-const fetch = require('node-fetch');
+import fetch from 'node-fetch';
 
 /**
  * RedditService class handles all Reddit API interactions
@@ -265,4 +264,4 @@ class RedditService {
   }
 }
 
-module.exports = RedditService;
+export default RedditService;

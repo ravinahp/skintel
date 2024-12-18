@@ -1,5 +1,5 @@
-const cron = require('node-cron');
-const RedditService = require('./redditService');
+import cron from 'node-cron';
+import RedditService from './redditService.js';
 
 class SchedulerService {
     constructor() {
@@ -46,4 +46,4 @@ class SchedulerService {
     }
 }
 
-module.exports = SchedulerService;
+export default SchedulerService;
