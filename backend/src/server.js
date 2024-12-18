@@ -1,103 +1,61 @@
-import dotenv from 'dotenv';
+import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import morgan from 'morgan';
-import SchedulerService from './services/schedulerService.js';
-import RedditService from './services/redditService.js';
-
-dotenv.config();
-
-process.removeAllListeners('warning');
+import { RedditService } from './services/redditService.js';
+import { PineconeService } from './services/pineconeService.js';
 
 const app = express();
 const redditService = new RedditService();
-const scheduler = new SchedulerService();
+const pineconeService = new PineconeService();
 
-// Add at the top of your server.js, after imports
-console.log('Starting server initialization...');
-console.log('Environment:', process.env.NODE_ENV);
-console.log('Reddit credentials present:', {
-  clientId: !!process.env.REDDIT_CLIENT_ID,
-  clientSecret: !!process.env.REDDIT_CLIENT_SECRET,
-  userAgent: !!process.env.REDDIT_USER_AGENT
-});
-
-// Middleware
 app.use(cors());
 app.use(morgan('dev'));
 app.use(express.json());
 
-// Start the scheduler in production only
-if (process.env.NODE_ENV === 'production') {
-  scheduler.startWeeklyUpdate();
-  console.log('Weekly scheduler started in production mode');
+// Initialize Pinecone and start server
+async function startServer() {
+  try {
+    await pineconeService.initialize();
+    const PORT = process.env.PORT || 3000;
+    app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+  } catch (error) {
+    console.error('Failed to start server:', error);
+    process.exit(1);
+  }
 }
 
-// Health check endpoint for Render
-app.get('/', (req, res) => {
-  res.json({ status: 'Server is running' });
-});
+startServer();
 
-// Original collect endpoint
-app.get('/api/collect', async (req, res) => {
+// Core endpoints
+app.get('/api/collect-and-store', async (req, res) => {
   try {
-    const data = await scheduler.runManualUpdate();
-    
-    const postsBySubreddit = data.reduce((acc, post) => {
-      acc[post.subreddit] = (acc[post.subreddit] || 0) + 1;
-      return acc;
-    }, {});
-
-    res.json({
-      message: 'Data collection complete',
-      statistics: {
-        total_posts: data.length,
-        posts_by_subreddit: postsBySubreddit
-      },
-      data: data
-    });
+    const posts = await redditService.fetchAllSubreddits([
+      'SkincareAddiction', 'AsianBeauty', '30PlusSkinCare', 'acne', 'tretinoin'
+    ], 25);
+    const results = await pineconeService.upsertPosts(posts);
+    res.json({ message: 'Data collection complete', results });
   } catch (error) {
-    console.error('Error collecting data:', error);
-    res.status(500).json({ error: 'Failed to collect data' });
+    res.status(500).json({ error: 'Failed to collect and store data' });
   }
 });
 
-// Enhanced scheduler status endpoint for monitoring
-app.get('/api/scheduler/status', (req, res) => {
-  const nextSunday = new Date();
-  nextSunday.setDate(nextSunday.getDate() + (7 - nextSunday.getDay()) % 7);
-  nextSunday.setHours(0, 0, 0, 0);
-
-  res.json({
-    status: 'healthy',
-    environment: process.env.NODE_ENV,
-    schedulerRunning: process.env.NODE_ENV === 'production',
-    nextUpdate: nextSunday.toISOString(),
-    uptime: process.uptime()
-  });
+app.get('/api/search', async (req, res) => {
+  try {
+    const { query } = req.query;
+    if (!query) return res.status(400).json({ error: 'Query required' });
+    const results = await pineconeService.searchSimilar(query, 5);
+    res.json(results);
+  } catch (error) {
+    res.status(500).json({ error: 'Search failed' });
+  }
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log('=================================');
-  console.log(`Server running in ${process.env.NODE_ENV} mode`);
-  console.log(`Port: ${PORT}`);
-  console.log(`Time: ${new Date().toISOString()}`);
-  console.log('=================================');
-});
-
-// Add better error handling
-process.on('uncaughtException', (error) => {
-  console.error('Uncaught Exception:', error);
-  // Optionally notify your error tracking service
-});
-
-process.on('unhandledRejection', (error) => {
-  console.error('Unhandled Rejection:', error);
-  // Optionally notify your error tracking service
-});
-
-// Add error handler for the server
-app.on('error', (error) => {
-  console.error('Server error:', error);
+app.get('/api/pinecone/stats', async (req, res) => {
+  try {
+    const stats = await pineconeService.getStats();
+    res.json(stats);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to get stats' });
+  }
 });
