@@ -5,7 +5,8 @@
   "main": "src/server.js",
   "scripts": {
     "start": "node --no-deprecation src/server.js",
-    "dev": "nodemon --no-deprecation src/server.js"
+    "dev": "nodemon --no-deprecation src/server.js",
+    "debug": "node --inspect src/server.js"
   },
   "dependencies": {
     "cors": "^2.8.5",

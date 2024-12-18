@@ -13,6 +13,15 @@ const app = express();
 const redditService = new RedditService();
 const scheduler = new SchedulerService();
 
+// Add at the top of your server.js, after imports
+console.log('Starting server initialization...');
+console.log('Environment:', process.env.NODE_ENV);
+console.log('Reddit credentials present:', {
+  clientId: !!process.env.REDDIT_CLIENT_ID,
+  clientSecret: !!process.env.REDDIT_CLIENT_SECRET,
+  userAgent: !!process.env.REDDIT_USER_AGENT
+});
+
 // Middleware
 app.use(cors());
 app.use(morgan('dev'));
@@ -70,7 +79,11 @@ app.get('/api/scheduler/status', (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`Server running in ${process.env.NODE_ENV} mode on port ${PORT}`);
+  console.log('=================================');
+  console.log(`Server running in ${process.env.NODE_ENV} mode`);
+  console.log(`Port: ${PORT}`);
+  console.log(`Time: ${new Date().toISOString()}`);
+  console.log('=================================');
 });
 
 // Add better error handling
@@ -82,4 +95,9 @@ process.on('uncaughtException', (error) => {
 process.on('unhandledRejection', (error) => {
   console.error('Unhandled Rejection:', error);
   // Optionally notify your error tracking service
+});
+
+// Add error handler for the server
+app.on('error', (error) => {
+  console.error('Server error:', error);
 });
