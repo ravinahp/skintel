@@ -44,9 +44,24 @@ app.get('/api/search', async (req, res) => {
   try {
     const { query } = req.query;
     if (!query) return res.status(400).json({ error: 'Query required' });
-    const results = await pineconeService.searchSimilar(query, 5);
-    res.json(results);
+
+    // Get search results from Pinecone
+    const searchResults = await pineconeService.searchSimilar(query, 5);
+
+    // Generate summary using OpenAI
+    const summary = await pineconeService.summarizeResults(query, searchResults);
+
+    // Return both summary and sources
+    res.json({
+      summary,
+      sources: searchResults.map(result => ({
+        title: result.title,
+        url: result.url,
+        subreddit: result.subreddit
+      }))
+    });
   } catch (error) {
+    console.error('Search failed:', error);
     res.status(500).json({ error: 'Search failed' });
   }
 });

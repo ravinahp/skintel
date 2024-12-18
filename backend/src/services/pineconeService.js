@@ -80,4 +80,35 @@ export class PineconeService {
       return { status: 'error', error: error.message };
     }
   }
+
+  async summarizeResults(query, searchResults) {
+    if (!searchResults || searchResults.length === 0) {
+        return `No relevant information found for "${query}". Please try a different search term.`;
+    }
+
+    const completion = await this.openai.chat.completions.create({
+        model: "gpt-3.5-turbo",
+        messages: [
+            {
+                role: "system",
+                content: `You are a helpful skincare expert. Your task is to:
+1. ONLY summarize the provided Reddit posts and comments
+2. DO NOT make up or infer information that isn't in the posts
+3. If the posts don't contain relevant information, say so clearly
+4. Format your response with:
+   - Direct quotes or information from the posts
+   - Clearly indicate if information is limited or not relevant`
+            },
+            {
+                role: "user",
+                content: `Question: ${query}\n\nRelevant posts:\n${searchResults.map(result => 
+                    `Title: ${result.title}\nContent: ${result.text}\nComments: ${result.top_comments?.map(c => c.body).join(' ')}\n---`
+                ).join('\n')}`
+            }
+        ],
+        temperature: 0.3
+    });
+
+    return completion.choices[0].message.content;
+  }
 }
