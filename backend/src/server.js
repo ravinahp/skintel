@@ -3,32 +3,33 @@ const express = require('express');
 const cors = require('cors');
 const morgan = require('morgan');
 const RedditService = require('./services/redditService');
+const SchedulerService = require('./services/schedulerService');
 
 const app = express();
 const redditService = new RedditService();
+const scheduler = new SchedulerService();
 
 // Middleware
 app.use(cors());
 app.use(morgan('dev'));
 app.use(express.json());
 
-// Optimized endpoint to fetch posts from all subreddits
+// Start the scheduler in production only
+if (process.env.NODE_ENV === 'production') {
+  scheduler.startWeeklyUpdate();
+  console.log('Weekly scheduler started in production mode');
+}
+
+// Health check endpoint for Render
+app.get('/', (req, res) => {
+  res.json({ status: 'Server is running' });
+});
+
+// Original collect endpoint
 app.get('/api/collect', async (req, res) => {
   try {
-    const subreddits = [
-      'SkincareAddiction',
-      'AsianBeauty',
-      '30PlusSkinCare',
-      'acne',
-      'tretinoin'
-    ];
-
-    console.log('Starting data collection...');
-    const postsPerSubreddit = parseInt(req.query.limit) || 25;
+    const data = await scheduler.runManualUpdate();
     
-    const data = await redditService.fetchAllSubreddits(subreddits, postsPerSubreddit);
-    
-    // Group posts by subreddit for statistics
     const postsBySubreddit = data.reduce((acc, post) => {
       acc[post.subreddit] = (acc[post.subreddit] || 0) + 1;
       return acc;
@@ -48,7 +49,22 @@ app.get('/api/collect', async (req, res) => {
   }
 });
 
+// Enhanced scheduler status endpoint for monitoring
+app.get('/api/scheduler/status', (req, res) => {
+  const nextSunday = new Date();
+  nextSunday.setDate(nextSunday.getDate() + (7 - nextSunday.getDay()) % 7);
+  nextSunday.setHours(0, 0, 0, 0);
+
+  res.json({
+    status: 'healthy',
+    environment: process.env.NODE_ENV,
+    schedulerRunning: process.env.NODE_ENV === 'production',
+    nextUpdate: nextSunday.toISOString(),
+    uptime: process.uptime()
+  });
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`Server running in ${process.env.NODE_ENV} mode on port ${PORT}`);
 });

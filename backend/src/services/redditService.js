@@ -7,6 +7,8 @@ class RedditService {
     this.userAgent = process.env.REDDIT_USER_AGENT;
     this.accessToken = null;
     this.tokenExpiration = null;
+    // Track the last post ID we've seen for each subreddit
+    this.lastSeenPosts = new Map();
   }
 
   async getAccessToken() {
@@ -31,20 +33,6 @@ class RedditService {
     return this.accessToken;
   }
 
-  async fetchWithRetry(url, options, retries = 3) {
-    for (let i = 0; i < retries; i++) {
-      try {
-        const response = await fetch(url, options);
-        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-        return await response.json();
-      } catch (error) {
-        if (i === retries - 1) throw error;
-        // Wait before retrying (exponential backoff)
-        await new Promise(resolve => setTimeout(resolve, Math.pow(2, i) * 1000));
-      }
-    }
-  }
-
   async fetchAllSubreddits(subreddits, postsPerSubreddit = 25) {
     const token = await this.getAccessToken();
     const headers = {
@@ -52,27 +40,38 @@ class RedditService {
       'User-Agent': this.userAgent
     };
 
-    // Process subreddits in chunks to avoid rate limits
-    const chunkSize = 2;
     const allPosts = [];
+    for (const subreddit of subreddits) {
+      try {
+        // Get the last seen post ID for this subreddit
+        const lastSeenId = this.lastSeenPosts.get(subreddit);
+        
+        // Fetch new posts after the last seen ID
+        const url = `https://oauth.reddit.com/r/${subreddit}/hot.json?limit=${postsPerSubreddit}${lastSeenId ? `&after=t3_${lastSeenId}` : ''}`;
+        console.log(`Fetching from ${subreddit}, last seen: ${lastSeenId || 'none'}`);
+        
+        const response = await fetch(url, { headers });
+        const data = await response.json();
 
-    for (let i = 0; i < subreddits.length; i += chunkSize) {
-      const subredditChunk = subreddits.slice(i, i + chunkSize);
-      console.log(`Processing subreddits: ${subredditChunk.join(', ')}`);
+        if (!data.data?.children?.length) {
+          console.log(`No new posts found in r/${subreddit}`);
+          continue;
+        }
 
-      const chunkPromises = subredditChunk.map(async (subreddit) => {
-        try {
-          const data = await this.fetchWithRetry(
-            `https://oauth.reddit.com/r/${subreddit}/top.json?limit=${postsPerSubreddit}&t=day`,
-            { headers }
-          );
+        // Update last seen post ID
+        this.lastSeenPosts.set(subreddit, data.data.children[0].data.id);
 
-          if (!data.data?.children) {
-            console.error(`No data received for r/${subreddit}`);
-            return [];
-          }
-
-          const posts = data.data.children.map(post => ({
+        // Filter and process posts
+        const posts = data.data.children
+          .filter(post => {
+            // Filter criteria for quality posts
+            return post.data.score > 10 && // minimum upvotes
+                   post.data.num_comments > 5 && // minimum comments
+                   !post.data.removed && 
+                   !post.data.deleted &&
+                   post.data.selftext?.length > 0; // has content
+          })
+          .map(post => ({
             id: post.data.id,
             title: post.data.title,
             selftext: post.data.selftext,
@@ -84,48 +83,36 @@ class RedditService {
             subreddit: post.data.subreddit
           }));
 
-          // Process posts in smaller chunks for comments
-          const postChunkSize = 5;
-          for (let j = 0; j < posts.length; j += postChunkSize) {
-            const postChunk = posts.slice(j, j + postChunkSize);
-            const postsWithComments = await Promise.all(
-              postChunk.map(async (post) => {
-                try {
-                  const comments = await this.fetchTopComments(post.id);
-                  return { ...post, top_comments: comments };
-                } catch (error) {
-                  console.error(`Error fetching comments for post ${post.id}:`, error);
-                  return { ...post, top_comments: [] };
-                }
-              })
-            );
-            allPosts.push(...postsWithComments);
+        // Fetch comments for each post
+        for (const post of posts) {
+          try {
+            post.top_comments = await this.fetchTopComments(post.id, 5);
+          } catch (error) {
+            console.error(`Error fetching comments for post ${post.id}:`, error);
+            post.top_comments = [];
           }
-
-          console.log(`✓ Completed fetching from r/${subreddit}`);
-        } catch (error) {
-          console.error(`Error fetching from r/${subreddit}:`, error);
+          // Add delay between comment fetches to avoid rate limits
+          await new Promise(resolve => setTimeout(resolve, 1000));
         }
-      });
 
-      await Promise.all(chunkPromises);
-      // Small delay between chunks to avoid rate limits
-      await new Promise(resolve => setTimeout(resolve, 1000));
+        allPosts.push(...posts);
+        console.log(`✓ Fetched ${posts.length} new posts from r/${subreddit}`);
+
+      } catch (error) {
+        console.error(`Error fetching from r/${subreddit}:`, error);
+      }
+      // Add delay between subreddits to avoid rate limits
+      await new Promise(resolve => setTimeout(resolve, 2000));
     }
 
-    // Remove duplicates based on post ID
-    const uniquePosts = Array.from(
-      new Map(allPosts.map(post => [post.id, post])).values()
-    );
-
-    return uniquePosts;
+    return allPosts;
   }
 
   async fetchTopComments(postId, limit = 5) {
     const token = await this.getAccessToken();
     
     try {
-      const data = await this.fetchWithRetry(
+      const response = await fetch(
         `https://oauth.reddit.com/comments/${postId}.json?limit=${limit}&sort=top`,
         {
           headers: {
@@ -135,9 +122,9 @@ class RedditService {
         }
       );
 
-      if (!data[1]?.data?.children) {
-        return [];
-      }
+      const data = await response.json();
+      
+      if (!data[1]?.data?.children) return [];
 
       return data[1].data.children
         .filter(comment => !comment.data.stickied && comment.data.body)
