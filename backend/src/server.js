@@ -74,3 +74,29 @@ app.get('/api/pinecone/stats', async (req, res) => {
     res.status(500).json({ error: 'Failed to get stats' });
   }
 });
+
+app.get('/api/reddit-search', async (req, res) => {
+  try {
+    const { query } = req.query;
+    if (!query) return res.status(400).json({ error: 'Query required' });
+
+    // Search Reddit
+    const redditResults = await redditService.searchSpecific(query);
+    console.log(`Found ${redditResults.length} posts from Reddit`);
+
+    res.json({
+      results: redditResults.map(post => ({
+        title: post.title,
+        url: post.url,
+        subreddit: post.subreddit,
+        score: post.score,
+        num_comments: post.num_comments,
+        text: post.selftext,
+        comments: post.top_comments?.map(c => c.body)
+      }))
+    });
+  } catch (error) {
+    console.error('Reddit search failed:', error);
+    res.status(500).json({ error: 'Reddit search failed' });
+  }
+});

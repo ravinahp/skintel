@@ -132,4 +132,54 @@ export class RedditService {
       return [];
     }
   }
+
+  async searchSpecific(query, limit = 10) {
+    try {
+        console.log('Searching Reddit for:', query);
+        const headers = {
+            'Authorization': `Bearer ${await this.getAccessToken()}`,
+            'User-Agent': this.userAgent
+        };
+        
+        // Search across all subreddits with increased limit
+        const url = `https://oauth.reddit.com/search.json?q=${encodeURIComponent(query)}&sort=relevance&limit=${limit}`;
+        const response = await fetch(url, { headers });
+        if (!response.ok) return [];
+        
+        const data = await response.json();
+        const posts = data.data?.children || [];
+
+        // Process posts in parallel with less strict filtering
+        const processedPosts = await Promise.all(
+            posts
+                .filter(post => 
+                    post.data.score > 5 &&     // Lowered score threshold
+                    !post.data.removed &&
+                    !post.data.deleted &&
+                    post.data.selftext?.length > 0  // Keep this to ensure we have content
+                )
+                .map(async post => {
+                    const comments = await this.fetchTopComments(post.data.id, 8);
+                    return {
+                        id: post.data.id,
+                        title: post.data.title,
+                        selftext: post.data.selftext,
+                        url: `https://reddit.com${post.data.permalink}`,
+                        author: post.data.author,
+                        score: post.data.score,
+                        created_utc: post.data.created_utc,
+                        num_comments: post.data.num_comments,
+                        subreddit: post.data.subreddit,
+                        top_comments: comments
+                    };
+                })
+        );
+
+        // Sort by score
+        return processedPosts.sort((a, b) => b.score - a.score);
+    } catch (error) {
+        console.error('Reddit search failed:', error);
+        return [];
+    }
+  }
 }
